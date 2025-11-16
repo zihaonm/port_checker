@@ -1,0 +1,17 @@
+# Service Port Monitoring Configuration
+# Format: <cron_schedule> <endpoint>
+# Cron format: minute hour day_of_month month day_of_week
+# Endpoint types:
+#   - TCP: IP:port (e.g., 127.0.0.1:3390)
+#   - HTTP: http://domain.com or http://IP:port/path
+#   - HTTPS: https://domain.com (includes SSL cert monitoring)
+
+# TCP port checks
+*/5 4-23 * * * 127.0.0.1:2222
+*/5 4-23 * * * 127.0.0.1:3001
+
+# HTTP/HTTPS checks (with SSL certificate monitoring)
+*/10 4-23 * * * https://git.mutual.top/
+*/15 4-23 * * * https://youtrack.mutual.top/
+*/30 4-23 * * * https://www.mutual.top/
+*/30 4-23 * * * https://main.mutual.top/zh

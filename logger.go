@@ -64,6 +64,11 @@ func (l *Logger) LogError(message string) {
 	l.Log(fmt.Sprintf("ERROR: %s", message))
 }
 
+// LogWarning logs warning messages
+func (l *Logger) LogWarning(message string) {
+	l.Log(fmt.Sprintf("WARNING: %s", message))
+}
+
 // Close closes the log file
 func (l *Logger) Close() error {
 	return l.file.Close()

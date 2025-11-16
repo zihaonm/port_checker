@@ -1,5 +1,7 @@
 # Binaries
 service-port-monitor
+port-checker
+port-checker-linux
 *.exe
 *.dll
 *.so

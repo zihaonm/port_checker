@@ -66,3 +66,51 @@ func LoadTargets(filename string) ([]Target, error) {
 
 	return targets, nil
 }
+
+// LoadTargetsFromString parses targets from a string (for embedded content)
+func LoadTargetsFromString(content string) ([]Target, error) {
+	var targets []Target
+	lineNum := 0
+
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	for scanner.Scan() {
+		lineNum++
+		line := strings.TrimSpace(scanner.Text())
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Parse line: first 5 fields are cron schedule, last is endpoint
+		fields := strings.Fields(line)
+		if len(fields) < 6 {
+			return nil, fmt.Errorf("invalid format at line %d: expected at least 6 fields (5 cron + endpoint)", lineNum)
+		}
+
+		// Cron schedule: first 5 fields
+		schedule := strings.Join(fields[0:5], " ")
+		// Endpoint: last field
+		endpoint := fields[5]
+
+		// Validate endpoint format (should contain ':')
+		if !strings.Contains(endpoint, ":") && !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+			return nil, fmt.Errorf("invalid endpoint at line %d: %s", lineNum, endpoint)
+		}
+
+		targets = append(targets, Target{
+			Schedule: schedule,
+			Endpoint: endpoint,
+		})
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error parsing config: %w", err)
+	}
+
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("no valid targets found in config")
+	}
+
+	return targets, nil
+}

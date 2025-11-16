@@ -4,18 +4,37 @@ A Go-based background monitoring tool that checks if IP:port endpoints are reach
 
 ## Features
 
-- Scheduled health checks using cron expressions
-- TCP connection testing with 5-second timeout
-- Telegram notifications for status changes
-- Continuous logging of all status changes
-- Support for running as systemd service or Docker container
-- Graceful shutdown on SIGINT/SIGTERM
+- **Multiple Check Types:**
+  - TCP port connectivity checks
+  - HTTP/HTTPS endpoint monitoring with status code validation
+  - SSL certificate expiration monitoring (30-day warning)
+
+- **Advanced Monitoring:**
+  - Response time tracking and metrics
+  - Alert throttling and escalation (prevents spam)
+  - Configurable check schedules using cron expressions
+
+- **Web Dashboard:**
+  - Real-time status visualization at http://localhost:8080
+  - Service uptime statistics
+  - Response time metrics with color-coded alerts
+  - SSL certificate expiration warnings
+
+- **Smart Notifications:**
+  - Telegram alerts for status changes
+  - Escalation alerts for persistent failures (3, 6, 10+ failures)
+  - Detailed downtime and recovery information
+  - SSL certificate expiration warnings
+
+- **Deployment Options:**
+  - Run as standalone binary
+  - systemd service integration
+  - Graceful shutdown on SIGINT/SIGTERM
 
 ## Requirements
 
 - Go 1.21+ (for building from source)
 - Telegram Bot Token and Chat ID
-- Docker (optional, for containerized deployment)
 - systemd (optional, for service deployment)
 
 ## Configuration
@@ -44,6 +63,7 @@ TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
 TELEGRAM_CHAT_ID=123456789
 CONFIG_FILE=targets.txt
 LOG_FILE=checker.log
+DASHBOARD_PORT=8080
 ```
 
 ### 3. Targets Configuration
@@ -51,17 +71,23 @@ LOG_FILE=checker.log
 Edit `targets.txt` to define your monitoring targets:
 
 ```
-# Format: <minute> <hour> <day> <month> <weekday> <IP:port>
+# Format: <minute> <hour> <day> <month> <weekday> <endpoint>
 
-# Check every 10 minutes between 4am-11pm
+# TCP port checks
 */10 4-23 * * * 127.0.0.1:3390
 
-# Check every 10 minutes on weekdays (Mon-Sat)
-*/10 * * * 1-6 32.0.12.2:9090
+# HTTP/HTTPS checks (includes SSL certificate monitoring for HTTPS)
+*/5 * * * * https://example.com
+*/15 * * * * http://192.168.1.100:8080/health
 
-# Check every 30 minutes, every day
-*/30 * * * * 92.10.12.2:8080
+# Mix of different check types
+*/10 * * * 1-6 32.0.12.2:9090
 ```
+
+**Supported endpoint types:**
+- **TCP:** `IP:port` (e.g., `127.0.0.1:3390`)
+- **HTTP:** `http://domain.com` or `http://IP:port/path`
+- **HTTPS:** `https://domain.com` (automatically monitors SSL certificate expiration)
 
 #### Cron Format Reference
 
@@ -96,38 +122,40 @@ go run .
 ### Option 2: Build Binary
 
 ```bash
-# Build
-go build -o service-port-monitor
+# Quick build using script
+./build.sh
+
+# Or build manually
+go build -o port-checker
 
 # Run
-./service-port-monitor
+./port-checker
 ```
 
-### Option 3: Docker
+### Option 3: Build for Linux Server
+
+The build process **embeds .env and targets.txt directly into the binary**, so you don't need to copy config files separately!
 
 ```bash
-# Build image
-docker build -t service-port-monitor .
+# 1. Configure your .env and targets.txt locally
+nano .env          # Add your Telegram credentials
+nano targets.txt   # Add your monitoring targets
 
-# Run with docker-compose (recommended)
-docker-compose up -d
+# 2. Build for Linux (from macOS/any OS) - embeds the config files
+./build-linux.sh
 
-# Or run directly
-docker run -d \
-  --name service-port-monitor \
-  -e TELEGRAM_BOT_TOKEN="your_token" \
-  -e TELEGRAM_CHAT_ID="your_chat_id" \
-  -v $(pwd)/targets.txt:/app/targets.txt:ro \
-  -v $(pwd)/logs:/app/logs \
-  service-port-monitor
+# 3. Copy single binary to your Ubuntu server
+scp port-checker-linux user@your-server:~/
+
+# 4. SSH and run - no config files needed!
+ssh user@your-server
+./port-checker-linux
 ```
 
-View logs:
-```bash
-docker-compose logs -f
-# or
-docker logs -f service-port-monitor
-```
+**How it works:**
+- The build script embeds `.env` and `targets.txt` into the binary
+- Deploy just one file - no need to manage config files on the server
+- You can still override by creating `.env` or `targets.txt` on the server if needed
 
 ### Option 4: systemd Service
 
@@ -159,18 +187,53 @@ sudo systemctl status service-port-monitor
 sudo journalctl -u service-port-monitor -f
 ```
 
+## Web Dashboard
+
+Access the real-time dashboard at `http://localhost:8080` (or your configured port).
+
+**Features:**
+- Live status of all monitored services
+- Response time metrics with color-coded indicators:
+  - Green: < 100ms (excellent)
+  - Orange: 100-500ms (acceptable)
+  - Red: > 500ms (slow)
+- Uptime statistics
+- SSL certificate expiration warnings
+- Auto-refresh every 5 seconds
+
 ## Notifications
 
-The monitor sends Telegram messages on status changes:
+The monitor sends enhanced Telegram messages:
 
 - **When service goes down:**
   ```
-  ⚠️ [DOWN] 92.10.12.2:8080 is not reachable
+  ⚠️ [DOWN] https://example.com is not reachable
+
+  Error: HTTP 503
   ```
 
 - **When service comes back up:**
   ```
-  ✅ [UP] 92.10.12.2:8080 is now reachable
+  ✅ [UP] https://example.com is now reachable
+
+  Was down for: 15.3 minutes
+  Failed checks: 3
+  ```
+
+- **Escalation alerts for persistent failures:**
+  ```
+  🚨 [DOWN] https://example.com is not reachable
+
+  Failure count: 10
+  Error: connection timeout
+  ```
+
+- **SSL certificate warnings (30 days before expiry):**
+  ```
+  ⚠️ [SSL WARNING] https://example.com
+
+  SSL certificate expires in 25 days
+  Expiry date: 2025-12-07 14:30
   ```
 
 ## Logging
@@ -179,11 +242,13 @@ All status changes are logged to `checker.log` (or path specified in `LOG_FILE`)
 
 ```
 [2025-11-07 10:30:00] INFO: Starting service port monitor
-[2025-11-07 10:30:00] INFO: Loaded 3 targets from targets.txt
-[2025-11-07 10:30:00] INFO: Scheduled monitoring for 127.0.0.1:3390 with schedule: */10 4-23 * * *
+[2025-11-07 10:30:00] INFO: Loaded 4 targets from targets.txt
+[2025-11-07 10:30:00] INFO: Scheduled monitoring for https://example.com with schedule: */5 * * * *
+[2025-11-07 10:30:00] Dashboard server starting on http://localhost:8080
 [2025-11-07 10:30:00] INFO: Running initial health checks
-[2025-11-07 10:30:05] 92.10.12.2:8080 is DOWN
-[2025-11-07 10:30:10] 127.0.0.1:3390 is UP
+[2025-11-07 10:30:05] INFO: https://example.com is UP (response time: 125ms)
+[2025-11-07 10:30:10] ERROR: 92.10.12.2:8080 is DOWN (error: connection refused, response time: 5s)
+[2025-11-07 10:30:11] WARNING: https://example.com SSL certificate expires in 25 days
 ```
 
 ## Project Structure
@@ -192,13 +257,12 @@ All status changes are logged to `checker.log` (or path specified in `LOG_FILE`)
 .
 ├── main.go              # Entry point and orchestration
 ├── config.go            # Configuration file parser
-├── checker.go           # TCP connection checker
+├── checker.go           # TCP/HTTP/HTTPS health checkers
 ├── telegram.go          # Telegram notification handler
 ├── logger.go            # Logging functionality
+├── dashboard.go         # Web dashboard server
 ├── targets.txt          # Monitoring targets configuration
 ├── .env.example         # Environment variables template
-├── Dockerfile           # Docker image definition
-├── docker-compose.yml   # Docker Compose configuration
 ├── service-port-monitor.service  # systemd service file
 └── README.md            # This file
 ```
