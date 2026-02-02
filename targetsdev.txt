@@ -1,0 +1,15 @@
+# Service Port Monitoring Configuration
+# Format: <cron_schedule> <endpoint>
+# Cron format: minute hour day_of_month month day_of_week
+# Endpoint types:
+#   - TCP: IP:port (e.g., 127.0.0.1:3390)
+#   - HTTP: http://domain.com or http://IP:port/path
+#   - HTTPS: https://domain.com (includes SSL cert monitoring)
+
+# TCP port checks
+*/1 * * * * 172.31.28.52:9290
+*/1 * * * * 172.31.17.146:6379 
+*/1 * * * * 95.40.135.175:8082
+*/1 * * * * 95.40.135.175:8801
+*/1 * * * * 95.40.135.175:8083
+

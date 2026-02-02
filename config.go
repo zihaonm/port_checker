@@ -11,6 +11,7 @@ import (
 type Target struct {
 	Schedule string // cron schedule
 	Endpoint string // IP:port
+	Name     string // optional friendly name for the target
 }
 
 // LoadTargets reads the configuration file and parses targets
@@ -34,7 +35,7 @@ func LoadTargets(filename string) ([]Target, error) {
 			continue
 		}
 
-		// Parse line: first 5 fields are cron schedule, last is endpoint
+		// Parse line: first 5 fields are cron schedule, 6th is endpoint, 7th is optional name
 		fields := strings.Fields(line)
 		if len(fields) < 6 {
 			return nil, fmt.Errorf("invalid format at line %d: expected at least 6 fields (5 cron + endpoint)", lineNum)
@@ -42,8 +43,13 @@ func LoadTargets(filename string) ([]Target, error) {
 
 		// Cron schedule: first 5 fields
 		schedule := strings.Join(fields[0:5], " ")
-		// Endpoint: last field
+		// Endpoint: 6th field
 		endpoint := fields[5]
+		// Name: optional 7th field
+		name := ""
+		if len(fields) >= 7 {
+			name = fields[6]
+		}
 
 		// Validate endpoint format (should contain ':')
 		if !strings.Contains(endpoint, ":") {
@@ -53,6 +59,7 @@ func LoadTargets(filename string) ([]Target, error) {
 		targets = append(targets, Target{
 			Schedule: schedule,
 			Endpoint: endpoint,
+			Name:     name,
 		})
 	}
 
@@ -82,7 +89,7 @@ func LoadTargetsFromString(content string) ([]Target, error) {
 			continue
 		}
 
-		// Parse line: first 5 fields are cron schedule, last is endpoint
+		// Parse line: first 5 fields are cron schedule, 6th is endpoint, 7th is optional name
 		fields := strings.Fields(line)
 		if len(fields) < 6 {
 			return nil, fmt.Errorf("invalid format at line %d: expected at least 6 fields (5 cron + endpoint)", lineNum)
@@ -90,8 +97,13 @@ func LoadTargetsFromString(content string) ([]Target, error) {
 
 		// Cron schedule: first 5 fields
 		schedule := strings.Join(fields[0:5], " ")
-		// Endpoint: last field
+		// Endpoint: 6th field
 		endpoint := fields[5]
+		// Name: optional 7th field
+		name := ""
+		if len(fields) >= 7 {
+			name = fields[6]
+		}
 
 		// Validate endpoint format (should contain ':')
 		if !strings.Contains(endpoint, ":") && !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
@@ -101,6 +113,7 @@ func LoadTargetsFromString(content string) ([]Target, error) {
 		targets = append(targets, Target{
 			Schedule: schedule,
 			Endpoint: endpoint,
+			Name:     name,
 		})
 	}
 

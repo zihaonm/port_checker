@@ -37,6 +37,7 @@ type Monitor struct {
 	notifier   *TelegramNotifier
 	logger     *Logger
 	statusMap  map[string]*EndpointStatus // tracks status and metrics of each endpoint
+	nameMap    map[string]string          // maps endpoint to friendly name
 	statusMu   sync.RWMutex
 }
 
@@ -46,11 +47,12 @@ func NewMonitor(notifier *TelegramNotifier, logger *Logger) *Monitor {
 		notifier:  notifier,
 		logger:    logger,
 		statusMap: make(map[string]*EndpointStatus),
+		nameMap:   make(map[string]string),
 	}
 }
 
 // CheckAndNotify checks an endpoint and sends notifications on status changes
-func (m *Monitor) CheckAndNotify(endpoint string) {
+func (m *Monitor) CheckAndNotify(endpoint string, name string) {
 	result := CheckEndpoint(endpoint)
 	now := time.Now()
 
@@ -65,8 +67,15 @@ func (m *Monitor) CheckAndNotify(endpoint string) {
 		m.statusMap[endpoint] = status
 	}
 
+	// Store the name mapping
+	if name != "" {
+		m.nameMap[endpoint] = name
+	}
+
 	// Update metrics
 	previousStatus := status.IsUp
+	previousFailureCount := status.FailureCount
+	previousLastStatusChange := status.LastStatusChange
 	status.LastCheck = now
 	status.ResponseTime = result.ResponseTime
 	status.StatusCode = result.StatusCode
@@ -118,7 +127,7 @@ func (m *Monitor) CheckAndNotify(endpoint string) {
 			timeSinceLastCertAlert := now.Sub(status.LastAlertTime)
 			// Send cert warning once per day
 			if timeSinceLastCertAlert > 24*time.Hour {
-				m.notifier.SendCertExpiryWarning(endpoint, *result.CertExpiry)
+				m.notifier.SendCertExpiryWarning(endpoint, name, *result.CertExpiry)
 				m.logger.LogWarning(fmt.Sprintf("%s SSL certificate expires in %.0f days", endpoint, daysUntilExpiry))
 			}
 		}
@@ -131,36 +140,25 @@ func (m *Monitor) CheckAndNotify(endpoint string) {
 		if result.IsUp {
 			if exists && previousStatus == false {
 				// Service recovered
-				downtime := now.Sub(status.LastStatusChange)
-				if err := m.notifier.SendUpAlert(endpoint, status.FailureCount, downtime); err != nil {
+				downtime := now.Sub(previousLastStatusChange)
+				if err := m.notifier.SendUpAlert(endpoint, name, previousFailureCount, downtime); err != nil {
 					m.logger.LogError(fmt.Sprintf("Failed to send UP notification for %s: %v", endpoint, err))
 				}
 			}
 		} else {
 			// Service is down
-			if err := m.notifier.SendDownAlert(endpoint, status.FailureCount, result.Error); err != nil {
+			if err := m.notifier.SendDownAlert(endpoint, name, status.FailureCount, result.Error); err != nil {
 				m.logger.LogError(fmt.Sprintf("Failed to send DOWN notification for %s: %v", endpoint, err))
 			}
 		}
 	}
 }
 
-// GetAllStatuses returns a snapshot of all endpoint statuses (for web dashboard)
-func (m *Monitor) GetAllStatuses() map[string]EndpointStatus {
-	m.statusMu.RLock()
-	defer m.statusMu.RUnlock()
-
-	snapshot := make(map[string]EndpointStatus)
-	for endpoint, status := range m.statusMap {
-		snapshot[endpoint] = *status
-	}
-	return snapshot
-}
-
 func main() {
-	// Load environment variables from embedded .env first, then try file system
+	// Load environment variables with priority: system env > file .env > embedded .env
+	// Step 1: Parse embedded .env into a map
+	envMap := make(map[string]string)
 	if embeddedEnv != "" {
-		// Parse embedded env vars
 		for _, line := range strings.Split(embeddedEnv, "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "#") {
@@ -170,22 +168,28 @@ func main() {
 			if len(parts) == 2 {
 				key := strings.TrimSpace(parts[0])
 				value := strings.TrimSpace(parts[1])
-				// Only set if not already set in environment
-				if os.Getenv(key) == "" {
-					os.Setenv(key, value)
-				}
+				envMap[key] = value
 			}
 		}
 	}
-	// Try to load from file system (overrides embedded)
-	_ = godotenv.Load()
+	// Step 2: Parse file system .env and override embedded values
+	if fileEnv, err := godotenv.Read(); err == nil {
+		for key, value := range fileEnv {
+			envMap[key] = value
+		}
+	}
+	// Step 3: Apply merged map, but never override system env vars
+	for key, value := range envMap {
+		if os.Getenv(key) == "" {
+			os.Setenv(key, value)
+		}
+	}
 
 	// Get configuration from environment
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	chatID := os.Getenv("TELEGRAM_CHAT_ID")
 	configFile := os.Getenv("CONFIG_FILE")
 	logFile := os.Getenv("LOG_FILE")
-	dashboardPort := os.Getenv("DASHBOARD_PORT")
 
 	// Set defaults
 	if configFile == "" {
@@ -193,9 +197,6 @@ func main() {
 	}
 	if logFile == "" {
 		logFile = "checker.log"
-	}
-	if dashboardPort == "" {
-		dashboardPort = "8080"
 	}
 
 	// Validate required configuration
@@ -214,22 +215,20 @@ func main() {
 
 	logger.LogInfo("Starting service port monitor")
 
-	// Load targets from embedded content first, then try file
+	// Load targets with priority: file system > embedded
 	var targets []Target
-	if embeddedTargets != "" {
+	targets, err = LoadTargets(configFile)
+	if err == nil {
+		logger.LogInfo(fmt.Sprintf("Loaded targets from file: %s", configFile))
+	} else if embeddedTargets != "" {
 		targets, err = LoadTargetsFromString(embeddedTargets)
 		if err == nil {
 			logger.LogInfo("Loaded targets from embedded configuration")
 		}
 	}
-
-	// If embedded failed or doesn't exist, try file system
 	if len(targets) == 0 {
-		targets, err = LoadTargets(configFile)
-		if err != nil {
-			logger.LogError(fmt.Sprintf("Failed to load targets: %v", err))
-			os.Exit(1)
-		}
+		logger.LogError("Failed to load targets from file or embedded configuration")
+		os.Exit(1)
 	}
 
 	logger.LogInfo(fmt.Sprintf("Loaded %d targets from %s", len(targets), configFile))
@@ -240,24 +239,17 @@ func main() {
 	// Initialize monitor
 	monitor := NewMonitor(notifier, logger)
 
-	// Start dashboard server in background
-	dashboard := NewDashboardServer(monitor, dashboardPort)
-	go func() {
-		if err := dashboard.Start(); err != nil {
-			logger.LogError(fmt.Sprintf("Dashboard server error: %v", err))
-		}
-	}()
-
 	// Create cron scheduler
 	c := cron.New()
 
 	// Register jobs for each target
 	for _, target := range targets {
 		endpoint := target.Endpoint
+		name := target.Name
 		schedule := target.Schedule
 
 		_, err := c.AddFunc(schedule, func() {
-			monitor.CheckAndNotify(endpoint)
+			monitor.CheckAndNotify(endpoint, name)
 		})
 
 		if err != nil {
@@ -275,7 +267,7 @@ func main() {
 	// Run initial checks for all endpoints
 	logger.LogInfo("Running initial health checks")
 	for _, target := range targets {
-		monitor.CheckAndNotify(target.Endpoint)
+		monitor.CheckAndNotify(target.Endpoint, target.Name)
 	}
 
 	// Wait for interrupt signal

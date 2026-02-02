@@ -1,0 +1,14 @@
+# Service Port Monitoring Configuration
+# Format: <cron_schedule> <endpoint>
+# Cron format: minute hour day_of_month month day_of_week
+# Endpoint types:
+#   - TCP: IP:port (e.g., 127.0.0.1:3390)
+#   - HTTP: http://domain.com or http://IP:port/path
+#   - HTTPS: https://domain.com (includes SSL cert monitoring)
+
+# TCP port checks
+*/1 6-22 * * * 127.0.0.1:8083 prod-im-api-java
+*/1 6-22 * * * 127.0.0.1:8082 prod-im-api-java-2
+*/1 6-22 * * * 127.0.0.1:6379  prod-Redis
+*/1 6-22 * * * 127.0.0.1:3306  prod-im-sql
+*/1 6-22 * * * 127.0.0.1:8801 prod-im-api-go

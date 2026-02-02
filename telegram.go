@@ -30,28 +30,43 @@ func NewTelegramNotifier(botToken, chatID string) *TelegramNotifier {
 }
 
 // SendDownAlert sends a notification when an endpoint is down
-func (t *TelegramNotifier) SendDownAlert(endpoint string, failureCount int, errorMsg string) error {
+func (t *TelegramNotifier) SendDownAlert(endpoint string, name string, failureCount int, errorMsg string) error {
 	var message string
+	displayName := endpoint
+	if name != "" {
+		displayName = fmt.Sprintf("%s (%s)", endpoint, name)
+	}
+
 	if failureCount > 1 {
-		message = fmt.Sprintf("🚨 [DOWN] %s is not reachable\n\nFailure count: %d\nError: %s", endpoint, failureCount, errorMsg)
+		message = fmt.Sprintf("🚨 [DOWN] %s is not reachable\n\nFailure count: %d\nError: %s", displayName, failureCount, errorMsg)
 	} else {
-		message = fmt.Sprintf("⚠️ [DOWN] %s is not reachable\n\nError: %s", endpoint, errorMsg)
+		message = fmt.Sprintf("⚠️ [DOWN] %s is not reachable\n\nError: %s", displayName, errorMsg)
 	}
 	return t.sendMessage(message)
 }
 
 // SendUpAlert sends a notification when an endpoint is back up
-func (t *TelegramNotifier) SendUpAlert(endpoint string, failureCount int, downtime time.Duration) error {
+func (t *TelegramNotifier) SendUpAlert(endpoint string, name string, failureCount int, downtime time.Duration) error {
+	displayName := endpoint
+	if name != "" {
+		displayName = fmt.Sprintf("%s (%s)", endpoint, name)
+	}
+
 	downtimeStr := formatDuration(downtime)
-	message := fmt.Sprintf("✅ [UP] %s is now reachable\n\nWas down for: %s\nFailed checks: %d", endpoint, downtimeStr, failureCount)
+	message := fmt.Sprintf("✅ [UP] %s is now reachable\n\nWas down for: %s\nFailed checks: %d", displayName, downtimeStr, failureCount)
 	return t.sendMessage(message)
 }
 
 // SendCertExpiryWarning sends a warning about expiring SSL certificate
-func (t *TelegramNotifier) SendCertExpiryWarning(endpoint string, expiryDate time.Time) error {
+func (t *TelegramNotifier) SendCertExpiryWarning(endpoint string, name string, expiryDate time.Time) error {
+	displayName := endpoint
+	if name != "" {
+		displayName = fmt.Sprintf("%s (%s)", endpoint, name)
+	}
+
 	daysUntilExpiry := time.Until(expiryDate).Hours() / 24
 	message := fmt.Sprintf("⚠️ [SSL WARNING] %s\n\nSSL certificate expires in %.0f days\nExpiry date: %s",
-		endpoint, daysUntilExpiry, expiryDate.Format("2006-01-02 15:04"))
+		displayName, daysUntilExpiry, expiryDate.Format("2006-01-02 15:04"))
 	return t.sendMessage(message)
 }
 
